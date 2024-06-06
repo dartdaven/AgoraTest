@@ -12,6 +12,12 @@
 #include "EnhancedInputSubsystems.h"
 #include "Engine/LocalPlayer.h"
 
+#include "Camera/CameraComponent.h"
+#include "GameFramework/SpringArmComponent.h"
+#include "Kismet/GameplayStatics.h"
+#include "Blueprint/UserWidget.h"
+#include "Components/Widget.h" 
+
 DEFINE_LOG_CATEGORY(LogTemplateCharacter);
 
 AAgoraPlayerController::AAgoraPlayerController()
@@ -20,6 +26,8 @@ AAgoraPlayerController::AAgoraPlayerController()
 	DefaultMouseCursor = EMouseCursor::Default;
 	CachedDestination = FVector::ZeroVector;
 	FollowTime = 0.f;
+
+	CameraMovementSpeed = 1000.f;
 }
 
 void AAgoraPlayerController::BeginPlay()
@@ -31,6 +39,18 @@ void AAgoraPlayerController::BeginPlay()
 	if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer()))
 	{
 		Subsystem->AddMappingContext(DefaultMappingContext, 0);
+	}
+
+	if (IsLocalPlayerController())
+	{
+		if (HUDWidgetClass)
+		{
+			HUDWidgetInstance = CreateWidget<UUserWidget>(this, HUDWidgetClass);
+			if (HUDWidgetInstance)
+			{
+				HUDWidgetInstance->AddToViewport();
+			}
+		}
 	}
 }
 
@@ -48,11 +68,10 @@ void AAgoraPlayerController::SetupInputComponent()
 		EnhancedInputComponent->BindAction(SetDestinationClickAction, ETriggerEvent::Completed, this, &AAgoraPlayerController::OnSetDestinationReleased);
 		EnhancedInputComponent->BindAction(SetDestinationClickAction, ETriggerEvent::Canceled, this, &AAgoraPlayerController::OnSetDestinationReleased);
 
-		// Setup touch input events
-		EnhancedInputComponent->BindAction(SetDestinationTouchAction, ETriggerEvent::Started, this, &AAgoraPlayerController::OnInputStarted);
-		EnhancedInputComponent->BindAction(SetDestinationTouchAction, ETriggerEvent::Triggered, this, &AAgoraPlayerController::OnTouchTriggered);
-		EnhancedInputComponent->BindAction(SetDestinationTouchAction, ETriggerEvent::Completed, this, &AAgoraPlayerController::OnTouchReleased);
-		EnhancedInputComponent->BindAction(SetDestinationTouchAction, ETriggerEvent::Canceled, this, &AAgoraPlayerController::OnTouchReleased);
+		// Setup camera movement
+		EnhancedInputComponent->BindAction(MoveCameraAction, ETriggerEvent::Triggered, this, &AAgoraPlayerController::MoveCamera);
+		EnhancedInputComponent->BindAction(ResetCameraAction, ETriggerEvent::Started, this, &AAgoraPlayerController::ResetCamera);
+
 	}
 	else
 	{
@@ -74,14 +93,9 @@ void AAgoraPlayerController::OnSetDestinationTriggered()
 	// We look for the location in the world where the player has pressed the input
 	FHitResult Hit;
 	bool bHitSuccessful = false;
-	if (bIsTouch)
-	{
-		bHitSuccessful = GetHitResultUnderFinger(ETouchIndex::Touch1, ECollisionChannel::ECC_Visibility, true, Hit);
-	}
-	else
-	{
-		bHitSuccessful = GetHitResultUnderCursor(ECollisionChannel::ECC_Visibility, true, Hit);
-	}
+	
+	bHitSuccessful = GetHitResultUnderCursor(ECollisionChannel::ECC_Visibility, true, Hit);
+	
 
 	// If we hit a surface, cache the location
 	if (bHitSuccessful)
@@ -89,7 +103,7 @@ void AAgoraPlayerController::OnSetDestinationTriggered()
 		CachedDestination = Hit.Location;
 	}
 	
-	// Move towards mouse pointer or touch
+	// Move towards mouse pointer
 	APawn* ControlledPawn = GetPawn();
 	if (ControlledPawn != nullptr)
 	{
@@ -111,15 +125,50 @@ void AAgoraPlayerController::OnSetDestinationReleased()
 	FollowTime = 0.f;
 }
 
-// Triggered every frame when the input is held down
-void AAgoraPlayerController::OnTouchTriggered()
+void AAgoraPlayerController::MoveCamera(const FInputActionValue& Value)
 {
-	bIsTouch = true;
-	OnSetDestinationTriggered();
+	AAgoraCharacter* ControlledAgoraCharacter = Cast<AAgoraCharacter>(GetPawn());
+
+	if (IsValid(ControlledAgoraCharacter))
+	{
+		USpringArmComponent* CameraBoom = ControlledAgoraCharacter->GetCameraBoom();
+
+		if (!CameraBoom->IsUsingAbsoluteLocation())
+		{
+			CameraBoom->SetUsingAbsoluteLocation(true);
+
+			CameraBoom->TargetOffset = ControlledAgoraCharacter->GetActorLocation();
+
+			ControlledAgoraCharacter->UpdateComponentTransforms();
+		}
+		else
+		{
+			FVector2D MovementVector = Value.Get<FVector2D>();
+			FVector DeltaLocation = FVector(MovementVector.Y * CameraMovementSpeed, MovementVector.X * CameraMovementSpeed, 0) * UGameplayStatics::GetWorldDeltaSeconds(this);
+		
+			CameraBoom->TargetOffset += DeltaLocation;
+		}
+
+	}
+
+
 }
 
-void AAgoraPlayerController::OnTouchReleased()
+void AAgoraPlayerController::ResetCamera()
 {
-	bIsTouch = false;
-	OnSetDestinationReleased();
+	AAgoraCharacter* ControlledAgoraCharacter = Cast<AAgoraCharacter>(GetPawn());
+
+	if (IsValid(ControlledAgoraCharacter))
+	{
+		USpringArmComponent* CameraBoom = ControlledAgoraCharacter->GetCameraBoom();
+
+		if (CameraBoom->IsUsingAbsoluteLocation())
+		{
+			CameraBoom->SetUsingAbsoluteLocation(false);
+
+			CameraBoom->TargetOffset = FVector::ZeroVector;
+
+			ControlledAgoraCharacter->UpdateComponentTransforms();
+		}
+	}
 }
