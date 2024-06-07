@@ -17,6 +17,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "Blueprint/UserWidget.h"
 #include "Components/Widget.h" 
+#include "InteractInterface.h"
 
 DEFINE_LOG_CATEGORY(LogTemplateCharacter);
 
@@ -28,6 +29,7 @@ AAgoraPlayerController::AAgoraPlayerController()
 	FollowTime = 0.f;
 
 	CameraMovementSpeed = 1000.f;
+	MaxInteractionDistance = 250.f;
 }
 
 void AAgoraPlayerController::BeginPlay()
@@ -82,6 +84,16 @@ void AAgoraPlayerController::SetupInputComponent()
 void AAgoraPlayerController::OnInputStarted()
 {
 	StopMovement();
+
+	FHitResult Hit;
+	bool bHitSuccessful = false;
+
+	bHitSuccessful = GetHitResultUnderCursor(ECollisionChannel::ECC_Visibility, true, Hit);
+
+	if (Hit.GetActor() && Hit.GetActor()->GetClass()->ImplementsInterface(UInteractInterface::StaticClass()))
+	{
+		InteractWithObject(Hit.GetActor());
+	}
 }
 
 // Triggered every frame when the input is held down
@@ -114,8 +126,17 @@ void AAgoraPlayerController::OnSetDestinationTriggered()
 
 void AAgoraPlayerController::OnSetDestinationReleased()
 {
+
+	FHitResult Hit;
+	bool bHitSuccessful = false;
+
+	bHitSuccessful = GetHitResultUnderCursor(ECollisionChannel::ECC_Visibility, true, Hit);
+
+	if (Hit.GetActor() && Hit.GetActor()->GetClass()->ImplementsInterface(UInteractInterface::StaticClass())) 
+	{
+	}
 	// If it was a short press
-	if (FollowTime <= ShortPressThreshold)
+	else if (FollowTime <= ShortPressThreshold)
 	{
 		// We move there and spawn some particles
 		UAIBlueprintHelperLibrary::SimpleMoveToLocation(this, CachedDestination);
@@ -123,6 +144,42 @@ void AAgoraPlayerController::OnSetDestinationReleased()
 	}
 
 	FollowTime = 0.f;
+}
+
+
+void AAgoraPlayerController::InteractWithObject(AActor* InteractableObject)
+{
+	APawn* ControlledPawn = GetPawn();
+	if (ControlledPawn && InteractableObject)
+	{
+		float Distance = FVector::Dist(ControlledPawn->GetActorLocation(), InteractableObject->GetActorLocation());
+
+		if (Distance <= MaxInteractionDistance)
+		{
+			if (HasAuthority())
+			{
+				if (InteractableObject->GetClass()->ImplementsInterface(UInteractInterface::StaticClass()))
+				{
+					IInteractInterface::Execute_Interact(InteractableObject, GetPawn());
+				}
+			}
+			else
+			{
+				ServerInteractWithObject(InteractableObject);
+			}
+		}
+	}
+
+}
+
+void AAgoraPlayerController::ServerInteractWithObject_Implementation(AActor* InteractableObject)
+{
+	InteractWithObject(InteractableObject);
+}
+
+bool AAgoraPlayerController::ServerInteractWithObject_Validate(AActor* InteractableObject)
+{
+	return true;
 }
 
 void AAgoraPlayerController::MoveCamera(const FInputActionValue& Value)
@@ -148,10 +205,7 @@ void AAgoraPlayerController::MoveCamera(const FInputActionValue& Value)
 		
 			CameraBoom->TargetOffset += DeltaLocation;
 		}
-
 	}
-
-
 }
 
 void AAgoraPlayerController::ResetCamera()

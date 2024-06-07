@@ -50,6 +50,9 @@ public:
 
 	UUserWidget* HUDWidgetInstance;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Interaction")
+	float MaxInteractionDistance;
+
 protected:
 	/** True if the controlled character should navigate to the mouse cursor. */
 	uint32 bMoveToMouseCursor : 1;
@@ -63,6 +66,11 @@ protected:
 	void OnInputStarted();
 	void OnSetDestinationTriggered();
 	void OnSetDestinationReleased();
+
+	void InteractWithObject(AActor* InteractableObject);
+	
+	UFUNCTION(Server, Reliable, WithValidation)
+	void ServerInteractWithObject(AActor* InteractableObject);
 
 	void MoveCamera(const FInputActionValue& Value);
 
